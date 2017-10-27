@@ -11,12 +11,13 @@ import datetime
 import select
 import json
 
+packetTimeout = 50  # Dynamic value depenent on RTTs, defaults  to 50ms
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
-packetTimeout = 1000
-sentPackets = []    # tuple(sequence, data, number)
+sentPackets = {}    # key: SEQUENCE, values: (data, time)
+RTTs = []
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -27,7 +28,7 @@ dest = (UDP_IP, UDP_PORT)
 # Set up the socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(TIMEOUT)
-
+sock.setblocking(0)
 
 def currMillis():
     return int(round(time.time() * 1000))
@@ -42,8 +43,8 @@ def send_next_packet():
 
     data = sys.stdin.read(DATA_SIZE)
     if (len(data) > 0):
-        msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False})
-        sentPackets.append((SEQUENCE, data, currMillis()))
+        msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False, "retransmit": False})
+        sentPackets[SEQUENCE] = (data, currMillis())
         SEQUENCE += len(data)
 
         if sock.sendto(msg, dest) < len(msg):
@@ -56,44 +57,72 @@ def send_next_packet():
 
 
 def checkTimeout():
-    for tuple in sentPackets:
-        log("retransmitting")
-        seq = tuple[0]
-        data = tuple[1]
-        time = tuple[2]
+    """
+    Retransmits packet if it times out
+    """
+    for key in sentPackets.iterkeys():
+        data, time = sentPackets[key]
         if currMillis() - time > packetTimeout:
-            msg = json.dumps({"sequence": seq, "data": data, "ack": False, "eof": False})
-            sock.sendto(msg, dest)  # Send first packet
+            msg = json.dumps({"sequence": key, "data": data, "ack": False, "eof": False, "retransmit": True})
+            sentPackets[key] = (data, currMillis())
+            sock.sendto(msg, dest)
 
 send_next_packet()
 # obligatory send next packet
 
+def updateRTT(timeSent):
+    global packetTimeout
+    rtt = currMillis() - timeSent
+    RTTs.append(rtt)
+    log(str(RTTs))
+    packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
+
 # Now read in data, send packets
 while True:
-    log("ABOUT TO SLEEP")
+    #log("ABOUT TO SLEEP")
+    readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
 
-    # Check for message timout
-    # checkTimeout()
+    result = []
 
-    result = sock.recvfrom(MSG_SIZE)
+    for s in readable:
+        result = s.recvfrom(MSG_SIZE)
+
+    checkTimeout()
 
     if result:
         (data, addr) = result
-        try:
-            decoded = json.loads(data)
+        #try:
+        decoded = json.loads(data)
 
-            # If there is an ack, send next packet
-            if decoded['ack'] == SEQUENCE:
-                log("[recv ack] " + str(SEQUENCE))
-                sentPackets = []
-                # Try to send next packet; break if no more data
-                if (not send_next_packet()):
-                    break
-        except (ValueError, KeyError, TypeError):
-            log("[recv corrupt packet]")
-    else:
-        log("[error] timeout")
-        sys.exit(-1)
+        # If there is an ack, send next packet
+        if decoded['ack'] == SEQUENCE:
+            log("SEQUENCE match to: " + str(SEQUENCE))
+
+            ackedPacket = []
+
+            keyToRemove = ""
+            for key in sentPackets.iterkeys():
+                adjustedSequence = key + len(sentPackets[key][0])
+                if (adjustedSequence == SEQUENCE):
+                    keyToRemove = key
+
+            ackedPacket = sentPackets.pop(keyToRemove, None)
+
+            #log("[recv ack] " + str(SEQUENCE))
+
+            if ackedPacket is not None:
+            # Update RTT
+                updateRTT(ackedPacket[1])
+                log("New RTT: " + str(packetTimeout) + "ms")
+
+            # Try to send next packet; break if no more data
+            if (not send_next_packet()):
+                break
+        #except (ValueError, KeyError, TypeError):
+            #og("[recv corrupt packet]")
+    #else:
+        #log("[error] timeout")
+        #sys.exit(-1)
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
