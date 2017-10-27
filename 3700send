@@ -86,7 +86,6 @@ while True:
             if decoded['ack'] == SEQUENCE:
                 log("[recv ack] " + str(SEQUENCE))
                 sentPackets = []
-
                 # Try to send next packet; break if no more data
                 if (not send_next_packet()):
                     break
