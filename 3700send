@@ -11,7 +11,7 @@ import datetime
 import select
 import json
 
-packetTimeout = 50  # Dynamic value dependant on RTTs, defaults  to 50ms
+packetTimeout = 500  # Dynamic value depenent on RTTs, defaults  to 50ms
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
@@ -66,6 +66,7 @@ def checkTimeout():
         if currMillis() - time > packetTimeout:
             msg = json.dumps({"sequence": key, "data": data, "ack": False, "eof": False, "retransmit": True})
             sentPackets[key] = (data, currMillis())
+            log("Retransmitting: " + str(key))
             sock.sendto(msg, dest)
 
 
@@ -75,20 +76,31 @@ def updateRTT(timeSent):
     RTTs.append(rtt)
     packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
 
-def handlePackets(packetsReceived):
-    """
-    Appropriately handles packets received
-    :param packetsReceived: result from socket read
-    :return:
-    """
-    for packet in packetsReceived:
-        (data, addr) = packet
+def endConnection():
+    for x in range(0,10):
+        sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
+    sys.exit(0)
+
+# obligatory send next packet
+send_next_packet()
+
+# Now read in data, send packets
+while True:
+    readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
+    result = []
+
+    for s in readable:
+        result = s.recvfrom(MSG_SIZE)
+
+    checkTimeout()
+
+    if result:
+        (data, addr) = result
         #try:
         decoded = json.loads(data)
 
         # If there is an ack, send next packet
-        if decoded['ack']:
-            ackedPacketKey = ""
+        if decoded['ack'] == SEQUENCE:
 
             for key in sentPackets.iterkeys():
                 adjustedSequence = key + len(sentPackets[key][0])
@@ -97,24 +109,20 @@ def handlePackets(packetsReceived):
 
             ackedPacket = sentPackets.pop(ackedPacketKey, None)
 
-            log("[recv ack] " + str(decoded['ack']))
+            log("[recv ack] " + str(SEQUENCE))
+            log("[recv ack] " + str(SEQUENCE))
 
             # Update RTT
             if ackedPacket is not None:
                 updateRTT(ackedPacket[1])
 
         #except (ValueError, KeyError, TypeError):
-            #og("[recv corrupt packet]")
+            #log("[recv corrupt packet]")
     #else:
         #log("[error] timeout")
         #sys.exit(-1)
 
-def sendPackets():
-    for x in range(0, WINDOW_SIZE):
-        log("Sliding window: " + str(x))
-        if (not send_next_packet()):
-            return False
-    return True
+endConnection()
 
 def endConnection():
     """
