@@ -62,7 +62,6 @@ while True:
 
         # Send back an ack to the sender
         msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data'])})
-        # If we receive data, we assume it's in-order
 
       #log("ABOUT TO SEND " + msg)
 

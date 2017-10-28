@@ -11,14 +11,14 @@ import datetime
 import select
 import json
 
-packetTimeout = 50  # Dynamic value depenent on RTTs, defaults  to 50ms
+packetTimeout = 50  # Dynamic value dependant on RTTs, defaults  to 50ms
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
 sentPackets = {}    # key: SEQUENCE, values: (data, time)
 RTTs = []
-WINDOW_SIZE = 2
+WINDOW_SIZE = 10000000
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -68,8 +68,6 @@ def checkTimeout():
             sentPackets[key] = (data, currMillis())
             sock.sendto(msg, dest)
 
-send_next_packet()
-# obligatory send next packet
 
 def updateRTT(timeSent):
     global packetTimeout
@@ -101,8 +99,8 @@ def handlePackets(packetsReceived):
 
             log("[recv ack] " + str(decoded['ack']))
 
-            if ackedPacket is not None:
             # Update RTT
+            if ackedPacket is not None:
                 updateRTT(ackedPacket[1])
 
         #except (ValueError, KeyError, TypeError):
@@ -118,6 +116,9 @@ def sendPackets():
             return False
     return True
 
+# obligatory send next packet
+send_next_packet()
+
 # Now read in data, send packets
 while True:
     #log("ABOUT TO SLEEP")
@@ -128,8 +129,9 @@ while True:
     for s in readable:
         packetsReceived.append(s.recvfrom(MSG_SIZE))
 
-    checkTimeout()
     handlePackets(packetsReceived)
+    checkTimeout()
+
     if not sendPackets():
         break
 
