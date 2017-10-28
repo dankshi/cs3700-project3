@@ -18,6 +18,7 @@ TIMEOUT = 30
 SEQUENCE = 0
 sentPackets = {}    # key: SEQUENCE, values: (data, time)
 RTTs = []
+WINDOW_SIZE = 5
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -74,55 +75,62 @@ def updateRTT(timeSent):
     global packetTimeout
     rtt = currMillis() - timeSent
     RTTs.append(rtt)
-    log(str(RTTs))
     packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
+
+def handlePackets(packetsReceived):
+    """
+    Appropriately handles packets received
+    :param packetsReceived: result from socket read
+    :return:
+    """
+    for packet in packetsReceived:
+        (data, addr) = packet
+        #try:
+        decoded = json.loads(data)
+
+        # If there is an ack, send next packet
+        if decoded['ack']:
+            ackedPacketKey = ""
+
+            for key in sentPackets.iterkeys():
+                adjustedSequence = key + len(sentPackets[key][0])
+                if (adjustedSequence == SEQUENCE):
+                    ackedPacketKey = key
+
+            ackedPacket = sentPackets.pop(ackedPacketKey, None)
+
+            log("[recv ack] " + str(SEQUENCE))
+
+            if ackedPacket is not None:
+            # Update RTT
+                updateRTT(ackedPacket[1])
+
+        #except (ValueError, KeyError, TypeError):
+            #og("[recv corrupt packet]")
+    #else:
+        #log("[error] timeout")
+        #sys.exit(-1)
+
+def sendPackets():
+    for x in range(0, WINDOW_SIZE):
+        if (not send_next_packet()):
+            return False
+    return True
 
 # Now read in data, send packets
 while True:
     #log("ABOUT TO SLEEP")
     readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
 
-    result = []
+    packetsReceived = []
 
     for s in readable:
-        result = s.recvfrom(MSG_SIZE)
+        packetsReceived.append(s.recvfrom(MSG_SIZE))
 
     checkTimeout()
-
-    if result:
-        (data, addr) = result
-        #try:
-        decoded = json.loads(data)
-
-        # If there is an ack, send next packet
-        if decoded['ack'] == SEQUENCE:
-            log("SEQUENCE match to: " + str(SEQUENCE))
-
-            ackedPacket = []
-
-            keyToRemove = ""
-            for key in sentPackets.iterkeys():
-                adjustedSequence = key + len(sentPackets[key][0])
-                if (adjustedSequence == SEQUENCE):
-                    keyToRemove = key
-
-            ackedPacket = sentPackets.pop(keyToRemove, None)
-
-            #log("[recv ack] " + str(SEQUENCE))
-
-            if ackedPacket is not None:
-            # Update RTT
-                updateRTT(ackedPacket[1])
-                log("New RTT: " + str(packetTimeout) + "ms")
-
-            # Try to send next packet; break if no more data
-            if (not send_next_packet()):
-                break
-        #except (ValueError, KeyError, TypeError):
-            #og("[recv corrupt packet]")
-    #else:
-        #log("[error] timeout")
-        #sys.exit(-1)
+    handlePackets(packetsReceived)
+    if not sendPackets():
+        break
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
