@@ -18,7 +18,7 @@ TIMEOUT = 30
 SEQUENCE = 0
 sentPackets = {}    # key: SEQUENCE, values: (data, time)
 RTTs = []
-WINDOW_SIZE = 5
+WINDOW_SIZE = 2
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -94,12 +94,12 @@ def handlePackets(packetsReceived):
 
             for key in sentPackets.iterkeys():
                 adjustedSequence = key + len(sentPackets[key][0])
-                if (adjustedSequence == SEQUENCE):
+                if (adjustedSequence == decoded['ack']):
                     ackedPacketKey = key
 
             ackedPacket = sentPackets.pop(ackedPacketKey, None)
 
-            log("[recv ack] " + str(SEQUENCE))
+            log("[recv ack] " + str(decoded['ack']))
 
             if ackedPacket is not None:
             # Update RTT
@@ -113,6 +113,7 @@ def handlePackets(packetsReceived):
 
 def sendPackets():
     for x in range(0, WINDOW_SIZE):
+        log("Sliding window: " + str(x))
         if (not send_next_packet()):
             return False
     return True
