@@ -116,12 +116,20 @@ def sendPackets():
             return False
     return True
 
+def endConnection():
+    """
+    Ends the connection
+    :return:
+    """
+    for x in range(0, 10):
+        sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
+    sys.exit(0)
+
 # obligatory send next packet
 send_next_packet()
 
 # Now read in data, send packets
 while True:
-    #log("ABOUT TO SLEEP")
     readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
 
     packetsReceived = []
@@ -135,5 +143,4 @@ while True:
     if not sendPackets():
         break
 
-sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
-sys.exit(0)
+endConnection()

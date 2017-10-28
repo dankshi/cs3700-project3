@@ -47,6 +47,7 @@ while True:
       if (decoded['eof']):
         for key in sorted(recvPackets.iterkeys()):
             sys.stdout.write(recvPackets[key])
+            log(str(recvPackets[key]))
         log("[completed]")
         sys.exit(0)
 
