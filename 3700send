@@ -11,14 +11,78 @@ import datetime
 import select
 import json
 
-packetTimeout = 500  # Dynamic value depenent on RTTs, defaults  to 50ms
+packetTimeout = 500  # Dynamic value depenent on RTTs, defaults to 500ms
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
 sentPackets = {}    # key: SEQUENCE, values: (data, time)
 RTTs = []
+WINDOW_SIZE = 10000000
+"""
+******************************************************************
+WINDOW_SIZE = 1
+******************************************************************
+Basic (friendly network) tests
+  Small 1 Mb/s, 10 ms latency                               [PASS]
+  Small 0.1 Mb/s 10 ms latency                              [PASS]
+  Small 0.1 Mb/s 50 ms latency                              [PASS]
+  Medium 1 Mb/s, 10 ms latency                              [PASS]
+  Medium 0.1 Mb/s 10 ms latency                             [FAIL]
+  Medium 0.1 Mb/s 50 ms latency                             [FAIL]
+  Large 1 Mb/s, 10 ms latency                               [PASS]
+  Large 0.5 Mb/s 10 ms latency                              [PASS]
+  Large 0.1 Mb/s 500 ms latency                             [FAIL]
 
+Advanced tests
+  Small 1Mb/s, 10 ms, 100% duplicate                        [PASS]
+  Medium 1Mb/s, 10 ms, 50% reorder 10% drop                 [PASS]
+  Medium 1Mb/s, 10 ms, 50% drop                             [PASS]
+  Medium 1Mb/s, 10 ms, 50% delay 25% duplicate              [FAIL]
+  Medium 5Mb/s, 10 ms, 5% delay 5% duplicate 5% drop        [PASS]
+  Large 1Mb/s, 10 ms, 10% delay 10% duplicate               [PASS]
+  Large 10Mb/s, 10ms, 1% drop 1% duplicate 1% drop          [PASS]
+
+Performance tests
+  Huge 5Mb/s, 10 ms                                         [PASS]
+    20.492 sec elapsed, 1MB sent
+  Large 5Mb/s, 10 ms, 10% drop                              [PASS]
+    3.271 sec elapsed, 130KB sent
+  Large 10Mb/s, 50 ms, 10% drop                             [PASS]
+    15.944 sec elapsed, 124KB sent
+  Large 10Mb/s, 25 ms, 10% drop 10% duplicate 20% delay     [PASS]
+    5.589 sec elapsed, 375KB sent
+    
+******************************************************************
+WINDOW_SIZE = 10000000
+******************************************************************
+Basic (friendly network) tests
+  Small 1 Mb/s, 10 ms latency                               [PASS]
+  Small 0.1 Mb/s 10 ms latency                              [PASS]
+  Small 0.1 Mb/s 50 ms latency                              [PASS]
+  Medium 1 Mb/s, 10 ms latency                              [PASS]
+  Medium 0.1 Mb/s 10 ms latency                             [PASS]
+  Medium 0.1 Mb/s 50 ms latency                             [PASS]
+  Large 1 Mb/s, 10 ms latency                               [PASS]
+  Large 0.5 Mb/s 10 ms latency                              [PASS]
+  Large 0.1 Mb/s 500 ms latency                             [PASS]
+
+Advanced tests
+  Small 1Mb/s, 10 ms, 100% duplicate                        [PASS]
+  Medium 1Mb/s, 10 ms, 50% reorder 10% drop                 [FAIL]
+  Medium 1Mb/s, 10 ms, 50% drop                             [FAIL]
+  Medium 1Mb/s, 10 ms, 50% delay 25% duplicate              [PASS]
+  Medium 5Mb/s, 10 ms, 5% delay 5% duplicate 5% drop        [PASS]
+  Large 1Mb/s, 10 ms, 10% delay 10% duplicate               [PASS]
+  Large 10Mb/s, 10ms, 1% drop 1% duplicate 1% drop          [FAIL]
+
+Performance tests
+  Huge 5Mb/s, 10 ms                                         [PASS]
+    2.155 sec elapsed, 1MB sent
+  Large 5Mb/s, 10 ms, 10% drop                              [FAIL]
+  Large 10Mb/s, 50 ms, 10% drop                             [FAIL]
+  Large 10Mb/s, 25 ms, 10% drop 10% duplicate 20% delay     [FAIL]
+"""
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
 UDP_IP = IP_PORT[0:IP_PORT.find(":")]
@@ -31,14 +95,22 @@ sock.settimeout(TIMEOUT)
 sock.setblocking(0)
 
 def currMillis():
+    """
+    Helper method toget current time in ms
+    """
     return int(round(time.time() * 1000))
 
-
 def log(string):
+    """
+    Helper method for logging data
+    """
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
 
-
 def send_next_packet():
+    """
+    sends the next packet and increments SEQUENCE
+    :return:
+    """
     global SEQUENCE
 
     data = sys.stdin.read(DATA_SIZE)
@@ -70,13 +142,53 @@ def checkTimeout():
 
 
 def updateRTT(timeSent):
+    """
+    Updates the RTT depending on the last packet received
+    """
     global packetTimeout
     rtt = currMillis() - timeSent
     RTTs.append(rtt)
     packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
 
+def handlePackets(packets):
+    for packet in packets:
+        (data, addr) = packet
+        #try:
+        decoded = json.loads(data)
+
+        # If there is an ack, send next packet
+        if decoded['ack']:
+            keyToRemove = ""
+
+            for key in sentPackets.iterkeys():
+                adjustedSequence = key + len(sentPackets[key][0])
+                if (adjustedSequence == decoded['ack']):
+                    keyToRemove = key
+
+            ackedPacket = sentPackets.pop(keyToRemove, None)
+
+            log("[recv ack] " + str(SEQUENCE))
+
+            if ackedPacket is not None:
+                updateRTT(ackedPacket[1])
+
+        #except (ValueError, KeyError, TypeError):
+            #log("[recv corrupt packet]")
+    #else:
+        #log("[error] timeout")
+        #sys.exit(-1)
+
+def sendPackets():
+    # Try to send next packet; break if no more data
+    availableWindow = WINDOW_SIZE - len(sentPackets)
+    for x in range(0, availableWindow):
+        if (not send_next_packet()):
+            return False
+            break
+    return True
+
 def endConnection():
-    for x in range(0,10):
+    for x in range(0, 10):
         sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
     sys.exit(0)
 
@@ -89,42 +201,11 @@ while True:
     result = []
 
     for s in readable:
-        result = s.recvfrom(MSG_SIZE)
+        result.append(s.recvfrom(MSG_SIZE))
 
     checkTimeout()
-
-    if result:
-        (data, addr) = result
-        #try:
-        decoded = json.loads(data)
-
-        # If there is an ack, send next packet
-        if decoded['ack'] == SEQUENCE:
-
-            ackedPacket = []
-
-            keyToRemove = ""
-            for key in sentPackets.iterkeys():
-                adjustedSequence = key + len(sentPackets[key][0])
-                if (adjustedSequence == SEQUENCE):
-                    keyToRemove = key
-
-            ackedPacket = sentPackets.pop(keyToRemove, None)
-
-            log("[recv ack] " + str(SEQUENCE))
-            log("[recv ack] " + str(SEQUENCE))
-
-            if ackedPacket is not None:
-            # Update RTT
-                updateRTT(ackedPacket[1])
-
-            # Try to send next packet; break if no more data
-            if (not send_next_packet()):
-                break
-        #except (ValueError, KeyError, TypeError):
-            #log("[recv corrupt packet]")
-    #else:
-        #log("[error] timeout")
-        #sys.exit(-1)
+    handlePackets(result)
+    if(not sendPackets()):
+        break
 
 endConnection()
