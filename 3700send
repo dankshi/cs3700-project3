@@ -76,15 +76,6 @@ def updateRTT(timeSent):
     RTTs.append(rtt)
     packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
 
-def endConnection():
-    for x in range(0,10):
-        sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
-    sys.exit(0)
-
-# obligatory send next packet
-send_next_packet()
-
-
 def handlePackets(packetsReceived):
     """
     Appropriately handles packets received
@@ -118,7 +109,7 @@ def handlePackets(packetsReceived):
                 # else:
                 # log("[error] timeout")
                 # sys.exit(-1)
-                
+
 def sendPackets():
     for x in range(0, WINDOW_SIZE):
         if (not send_next_packet()):
