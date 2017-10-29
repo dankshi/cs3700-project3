@@ -84,6 +84,46 @@ def endConnection():
 # obligatory send next packet
 send_next_packet()
 
+# Now read in data, send packets
+while True:
+    readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
+    result = []
+
+    for s in readable:
+        result = s.recvfrom(MSG_SIZE)
+
+    checkTimeout()
+
+    if result:
+        (data, addr) = result
+        #try:
+        decoded = json.loads(data)
+
+        # If there is an ack, send next packet
+        if decoded['ack'] == SEQUENCE:
+
+            for key in sentPackets.iterkeys():
+                adjustedSequence = key + len(sentPackets[key][0])
+                if (adjustedSequence == decoded['ack']):
+                    ackedPacketKey = key
+
+            ackedPacket = sentPackets.pop(ackedPacketKey, None)
+
+            log("[recv ack] " + str(SEQUENCE))
+            log("[recv ack] " + str(SEQUENCE))
+
+            # Update RTT
+            if ackedPacket is not None:
+                updateRTT(ackedPacket[1])
+
+        #except (ValueError, KeyError, TypeError):
+            #log("[recv corrupt packet]")
+    #else:
+        #log("[error] timeout")
+        #sys.exit(-1)
+
+endConnection()
+
 def endConnection():
     """
     Ends the connection
