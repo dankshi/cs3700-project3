@@ -74,7 +74,6 @@ def updateRTT(timeSent):
     global packetTimeout
     rtt = currMillis() - timeSent
     RTTs.append(rtt)
-    packetTimeout = (sum(RTTs) / float(len(RTTs))) * 2
 
 def handlePackets(packetsReceived):
     """
@@ -116,15 +115,6 @@ def sendPackets():
             return False
     return True
 
-def endConnection():
-    """
-    Ends the connection
-    :return:
-    """
-    for x in range(0, 10):
-        sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
-    sys.exit(0)
-
 # obligatory send next packet
 send_next_packet()
 
@@ -143,4 +133,5 @@ while True:
     if not sendPackets():
         break
 
-endConnection()
+sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
+sys.exit(0)
