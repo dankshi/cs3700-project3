@@ -65,23 +65,26 @@ Basic (friendly network) tests
   Medium 0.1 Mb/s 50 ms latency                             [PASS]
   Large 1 Mb/s, 10 ms latency                               [PASS]
   Large 0.5 Mb/s 10 ms latency                              [PASS]
-  Large 0.1 Mb/s 500 ms latency                             [PASS]
+  Large 0.1 Mb/s 500 ms latency                             [FAIL]
 
 Advanced tests
   Small 1Mb/s, 10 ms, 100% duplicate                        [PASS]
-  Medium 1Mb/s, 10 ms, 50% reorder 10% drop                 [FAIL]
-  Medium 1Mb/s, 10 ms, 50% drop                             [FAIL]
+  Medium 1Mb/s, 10 ms, 50% reorder 10% drop                 [PASS]
+  Medium 1Mb/s, 10 ms, 50% drop                             [PASS]
   Medium 1Mb/s, 10 ms, 50% delay 25% duplicate              [PASS]
   Medium 5Mb/s, 10 ms, 5% delay 5% duplicate 5% drop        [PASS]
   Large 1Mb/s, 10 ms, 10% delay 10% duplicate               [PASS]
-  Large 10Mb/s, 10ms, 1% drop 1% duplicate 1% drop          [FAIL]
+  Large 10Mb/s, 10ms, 1% drop 1% duplicate 1% drop          [PASS]
 
 Performance tests
   Huge 5Mb/s, 10 ms                                         [PASS]
-    2.155 sec elapsed, 1MB sent
-  Large 5Mb/s, 10 ms, 10% drop                              [FAIL]
-  Large 10Mb/s, 50 ms, 10% drop                             [FAIL]
-  Large 10Mb/s, 25 ms, 10% drop 10% duplicate 20% delay     [FAIL]
+    7.419 sec elapsed, 4MB sent
+  Large 5Mb/s, 10 ms, 10% drop                              [PASS]
+    3.505 sec elapsed, 128KB sent
+  Large 10Mb/s, 50 ms, 10% drop                             [PASS]
+    3.528 sec elapsed, 128KB sent
+  Large 10Mb/s, 25 ms, 10% drop 10% duplicate 20% delay     [PASS]
+    2.836 sec elapsed, 133KB sent
 """
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -196,16 +199,23 @@ def endConnection():
 send_next_packet()
 
 # Now read in data, send packets
-while True:
+while sentPackets:
     readable, writable, exceptional = select.select([sock], [], [], float(packetTimeout/1000))
     result = []
 
     for s in readable:
-        result.append(s.recvfrom(MSG_SIZE))
+        try:
+            while True:
+                data = s.recvfrom(MSG_SIZE)
+
+                if not data:
+                    break
+                result.append(data)
+        except:
+            log("No data, not fatal")
 
     checkTimeout()
     handlePackets(result)
-    if(not sendPackets()):
-        break
+    sendPackets()
 
 endConnection()
