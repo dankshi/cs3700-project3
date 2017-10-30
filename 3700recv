@@ -18,8 +18,8 @@ def log(string):
 
 MSG_SIZE = 1500
 TIMEOUT = 30
-
-RECV_PACKETS = {}       # Dictionary of all received packets. key: sequence, value: data
+LAST_BYTE_RECV = 0  # Keeps track of last byte received for logging purposes
+RECV_PACKETS = {}  # Dictionary of all received packets. key: sequence, value: data
 
 # Bind to localhost and an ephemeral port
 UDP_IP = "127.0.0.1"
@@ -50,12 +50,23 @@ def handleData(decoded, addr):
     """
     If there is data, we accept it and print it out, and send an ack
     """
+    global LAST_BYTE_RECV
     sequence = decoded['sequence']
 
     if sequence not in RECV_PACKETS:
         RECV_PACKETS[sequence] = decoded['data']
+        if LAST_BYTE_RECV != sequence:
+            log("[recv data] " + str(decoded['sequence']) + " (" + str(
+                len(decoded['data'])) + ") ACCEPTED (out-of-order)")
+            if sequence > LAST_BYTE_RECV:
+                LAST_BYTE_RECV = sequence + len(decoded['data'])
+        if LAST_BYTE_RECV == sequence:
+            log("[recv data] " + str(decoded['sequence']) + " (" + str(
+                len(decoded['data'])) + ") ACCEPTED (in-order)")
+            LAST_BYTE_RECV += len(decoded['data'])
+    else:
         log("[recv data] " + str(decoded['sequence']) + " (" + str(
-            len(decoded['data'])) + ") ACCEPTED (in-order)")
+            len(decoded['data'])) + ") IGNORED")
 
     # Send back an ack to the sender
     msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data'])})
