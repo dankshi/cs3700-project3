@@ -9,15 +9,17 @@ import socket
 import time
 import datetime
 import select
-import json     
+import json
+
 
 def log(string):
-  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+    sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+
 
 MSG_SIZE = 1500
 TIMEOUT = 30
 
-recvPackets = {}
+RECV_PACKETS = {}       # Dictionary of all received packets. key: sequence, value: data
 
 # Bind to localhost and an ephemeral port
 UDP_IP = "127.0.0.1"
@@ -32,46 +34,65 @@ sock.settimeout(TIMEOUT)
 UDP_PORT = sock.getsockname()[1]
 log("[bound] " + str(UDP_PORT))
 
-# Now listen for packets
-while True:
-  result = sock.recvfrom(MSG_SIZE)
 
-  # If nothing is ready, we hit the timeout
-  if result:
-    (data, addr) = result
+def endConnection():
+    """
+    When EOF is reached print out data and exit gracefully
+    :return:
+    """
+    for key in sorted(RECV_PACKETS.iterkeys()):
+        sys.stdout.write(RECV_PACKETS[key])
+    log("[completed]")
+    sys.exit(0)
 
-    try:
-      decoded = json.loads(data)
 
-      # If the EOF flag is set, exit
-      if (decoded['eof']):
-        for key in sorted(recvPackets.iterkeys()):
-            sys.stdout.write(recvPackets[key])
-        log("[completed]")
-        sys.exit(0)
+def handleData(decoded, addr):
+    """
+    If there is data, we accept it and print it out, and send an ack
+    """
+    sequence = decoded['sequence']
 
-      # If there is data, we accept it and print it out
-      if (decoded['data']):
-        sequence = decoded['sequence']
+    if sequence not in RECV_PACKETS:
+        RECV_PACKETS[sequence] = decoded['data']
+        log("[recv data] " + str(decoded['sequence']) + " (" + str(
+            len(decoded['data'])) + ") ACCEPTED (in-order)")
 
-        if sequence not in recvPackets:
-            recvPackets[sequence] = decoded['data']
-            # You will need to do much more here
-            log("[recv data] " + str(decoded['sequence']) + " (" + str(len(decoded['data'])) + ") ACCEPTED (in-order)")
-            #sys.stdout.write(decoded['data'])
+    # Send back an ack to the sender
+    msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data'])})
 
-        # Send back an ack to the sender
-        msg = json.dumps({"ack": decoded['sequence'] + len(decoded['data'])})
-        # If we receive data, we assume it's in-order
+    log("ABOUT TO SEND " + msg)
 
-      log("ABOUT TO SEND " + msg)
-
-      if sock.sendto(msg, addr) < len(msg):
+    if sock.sendto(msg, addr) < len(msg):
         log("[error] unable to fully send packet")
 
-    except (ValueError, KeyError, TypeError) as e:
-      log("[recv corrupt packet]")
-      raise e
-  else:
-    log("[error] timeout")
-    sys.exit(-1)
+
+def readData():
+    """
+    Reads data from socket and appropriately handles it
+    :return:
+    """
+    result = sock.recvfrom(MSG_SIZE)
+
+    if result:
+        (data, addr) = result
+
+        try:
+            decoded = json.loads(data)
+
+            if (decoded['eof']):
+                endConnection()
+
+            if (decoded['data']):
+                handleData(decoded, addr)
+
+        except (ValueError, KeyError, TypeError) as e:
+            log("[recv corrupt packet]")
+            raise e
+    else:
+        log("[error] timeout")
+        sys.exit(-1)
+
+
+# Main loop
+while True:
+    readData()
